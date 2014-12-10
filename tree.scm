@@ -7,8 +7,16 @@
    )
   (protocol
    (lambda (make)
-     (lambda (name productions)
-       (make name productions)))))
+     (define f
+       (case-lambda
+         [(names->automaton name) (f names->automaton name '())]
+         [(names->automaton name productions)
+          (let ([a (make name productions)])
+            (assert (not (assoc name (box-value names->automaton))))
+            (box-value-set! names->automaton
+                            (cons (cons name a) (box-value names->automaton)))
+            a)]))
+     f)))
 
 (define-record-type production
   (fields
@@ -17,14 +25,19 @@
    children ;; set-of (list-of automaton?)
    ))
 
-(define names->automaton '())
+(define-record-type box (fields (mutable value)))
+(define names->automaton (make-box '()))
 ;; names->automaton :: alist (set-of symbol?) automaton?
 
+;; ll computes a tree comprehension.  It also filters out any results
+;; that are #f and each binding in the comprehension is in the scope
+;; of the RHS of each of the following bindings.
 (define-syntax ll
   (syntax-rules ()
-    [(_ (l1 list1) (l2 list2) body)
-     (filter (lambda (x) x)
-             (apply append (map (lambda (l1) (map (lambda (l2) body) list2)) list1)))]))
+    [(_ ([l1 list1]) body)
+     (filter (lambda (x) x) (map (lambda (l1) body) list1))]
+    [(_ ([l1 list1] . rest) body)
+     (apply append (map (lambda (l1) (ll rest body)) list1))]))
 
 ;; NOTE: names are sets of symbols so we have a sensible name for intersects and take advantage of the associativity, communitivity and idempotency of intersect
 ;; NOTE: the name '() thus is the name of the universe
@@ -36,59 +49,56 @@
       [else (cons (car l) (f (cdr l)))]))
   (f (list-sort string<? (append n1 n2))))
 
-(define (clear-caches) (set! names->automaton '()))
+(define (clear-caches) (box-value-set! names->automaton '()))
 
 (define new-automaton
   (case-lambda
-   [(name) (new-automaton name '())]
-   [(name productions)
-    (let ([a (make-automaton name productions)])
-      (assert (not (assoc name names->automaton)))
-      (set! names->automaton (cons (cons name a) names->automaton))
-      a)]))
+   [(name) (make-automaton names->automaton name)]
+   [(name productions) (make-automaton names->automaton name productions)]))
 
 (define (intersect a1 a2)
   (define name (combine-names (automaton-name a1) (automaton-name a2)))
   (define ps1 (automaton-productions a1))
   (define ps2 (automaton-productions a2))
   (cond
-    [(assoc name names->automaton) => cdr]
+    [(assoc name (box-value names->automaton)) => cdr]
     [else
      ;; We have to allocate the automaton in advance in case there is
-     ;; a recursive loop
+     ;; a recursive loop.  We set the automaton's productions after the recursion.
      (let ([a (new-automaton name)])
        (let ([ps
               ;; TODO: if we keep productions sorted by constructor name
               ;; then this outer loop could be done more efficiently by
               ;; traversing the lists in parallel
-              (ll (p1 ps1) (p2 ps2) ;; iterate over each production/constructor
+              (ll ([p1 ps1] [p2 ps2]) ;; iterate over each production/constructor
                   ;; filter for when the constructors are equal
                   (and (eq? (production-constructor p1)
                             (production-constructor p2))
                        (make-production
                         (production-constructor p1)
                         ;; iterate over each list of children
-                        (ll (cs1 (production-children p1))
-                            (cs2 (production-children p2))
+                        (ll ([cs1 (production-children p1)]
+                             [cs2 (production-children p2)])
                             ;; iterate over each child
                             (map intersect cs1 cs2)))))])
          (automaton-productions-set! a ps)
          a))]))
 
-(define (intersect-driver a1 a2)
-  ;; init cache of new automatons (we can get this by remembering pointer of names->automaton)
-  (define old-names->automaton names->automaton)
+#;(define (intersect-driver a1 a2)
+  ;; We remember which automata are newly created
+  ;; by seeing which automata are added onto the old list of automata
+  (define old-names->automaton (box-value names->automaton))
   (define for-each-new ;; applies 'f' to each new automaton
     (case-lambda
       [(f) (for-each-new f names->automaton)]
       [(f n)
        (cond
-         [(eq? n old-names->automaton) (values)]
-         [else (f (car n)) (for-each-new f (cdr n))])]))
-  (define a (intersect a1 a2))
+         [(eq? (box-value n) old-names->automaton) (values)]
+         [else (f (car (box-value n))) (for-each-new f (cdr (box-value n)))])]))
+  (define a (intersect a1 a2)) ;; The top-level new automaton
   ;; Start with the pessimistic assumption about non-emptiness
   (for-each-new (lambda (a) (automaton-non-empty-set! a #f)))
-  ;; construct the "inverse map"
+  ;; construct the "inverse map".  This maps automata names to the productions of the automata that contain them.
   ;; We could make this more efficient if we stored this inside the automaton instead of as an external assoc list
   (define inverse-map '()) ;; multi-map names=(list-of sym) (cons parent=automaton children=(list automaton))
   (for-each-new (lambda (a)
