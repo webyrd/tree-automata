@@ -66,6 +66,42 @@
                                                       #0#))])]
 |#
 
+(build-inverse-map (list env term1 term2 sym num nil binding) '())
+#|
+((("sym")
+   (#[automaton ("binding") (#[production cons ((#[automaton ("sym") (#[production sym ()])]
+                                                  #0=#[automaton ("term1") (#[production cons ((#0#
+                                                                                                 #0#))]
+                                                                             #[production sym (())]
+                                                                             #[production num (())])]))])]
+     #[automaton ("sym") (#[production sym ()])] #0#))
+  (("term2")
+    (#1=#[automaton ("term2") (#[production cons ((#1# #1#))]
+                                #[production nil (())]
+                                #[production sym (())]
+                                #[production num (())])]
+      #1# #1#)
+    (#1# #1# #1#))
+  (("term1")
+    (#[automaton ("binding") (#[production cons ((#[automaton ("sym") (#[production sym ()])]
+                                                   #0#))])]
+      #[automaton ("sym") (#[production sym ()])] #0#)
+    (#0# #0# #0#) (#0# #0# #0#))
+  (("env")
+    (#2=#[automaton ("env") (#[production nil (())]
+                              #[production cons ((#[automaton ("binding") (#[production cons ((#[automaton ("sym") (#[production sym ()])]
+                                                                                                #0#))])]
+                                                   #2#))])]
+      #[automaton ("binding") (#[production cons ((#[automaton ("sym") (#[production sym ()])]
+                                                    #0#))])]
+      #2#))
+  (("binding")
+    (#2#
+      #[automaton ("binding") (#[production cons ((#[automaton ("sym") (#[production sym ()])]
+                                                    #0#))])]
+      #2#)))
+|#
+
 
 ;; TODO:
 ;;   need to implement unfolding

@@ -34,10 +34,10 @@
 ;; of the RHS of each of the following bindings.
 (define-syntax ll
   (syntax-rules ()
-    [(_ ([l1 list1]) body)
-     (filter (lambda (x) x) (map (lambda (l1) body) list1))]
-    [(_ ([l1 list1] . rest) body)
-     (apply append (map (lambda (l1) (ll rest body)) list1))]))
+    [(_ ([l1 list1]) body0 . body)
+     (filter (lambda (x) x) (map (lambda (l1) body0 . body) list1))]
+    [(_ ([l1 list1] . rest) body0 . body)
+     (apply append (map (lambda (l1) (ll rest body0 . body)) list1))]))
 
 ;; NOTE: names are sets of symbols so we have a sensible name for intersects and take advantage of the associativity, communitivity and idempotency of intersect
 ;; NOTE: the name '() thus is the name of the universe
@@ -84,6 +84,40 @@
          (automaton-productions-set! a ps)
          a))]))
 
+;; runs f on each element of the part of new that is prefixed onto old.
+;; It is an error if old is not a suffix of new.
+(define (for-each-new new old f)
+  (cond
+    [(eq? new old) (values)]
+    [else (f (car new)) (for-each-new (cdr new) old f)]))
+
+;; construct the "inverse map".  This maps automata names to the
+;; productions of the automata that contain them.
+;;
+;; We could make this more efficient if we stored this inside the
+;; automaton instead of as an external assoc list
+;;
+;; Also note that duplicate entries could appear if
+;; there are multiple ways to be a child.
+;; We don't optimize this as the cost of de-duplication
+;; is high, and the algorithm using this inverse-map
+;; costs only a little extra due to the duplication.
+(define (build-inverse-map new old)
+  (define inverse-map '()) ;; multi-map names=(list-of sym) (cons parent=automaton children=(list automaton))
+  (for-each-new new old
+                (lambda (a)
+                  (ll ([p (automaton-productions a)]
+                       [cs (production-children p)]
+                       [c cs])
+                      (define entry (cons a cs))
+                      (define cell (assoc (automaton-name c) inverse-map))
+                      (if cell
+                          ;; Add to whatever was there before
+                          (set-cdr! cell (cons entry (cdr cell)))
+                          ;; Add a new entry
+                          (set! inverse-map (cons (cons (automaton-name c) (list entry)) inverse-map))))))
+  inverse-map)
+
 #;(define (intersect-driver a1 a2)
   ;; We remember which automata are newly created
   ;; by seeing which automata are added onto the old list of automata
@@ -98,32 +132,17 @@
   (define a (intersect a1 a2)) ;; The top-level new automaton
   ;; Start with the pessimistic assumption about non-emptiness
   (for-each-new (lambda (a) (automaton-non-empty-set! a #f)))
-  ;; construct the "inverse map".  This maps automata names to the productions of the automata that contain them.
-  ;; We could make this more efficient if we stored this inside the automaton instead of as an external assoc list
-  (define inverse-map '()) ;; multi-map names=(list-of sym) (cons parent=automaton children=(list automaton))
-  (for-each-new (lambda (a)
-                  (for-each
-                    (lambda (p)
-                      (for-each
-                        (lambda (cs)
-                          (for-each
-                            (lambda (c)
-                              (define entry (cons a cs))
-                              (define cell (assoc (automata-name c) inverse-map))
-                              (if cell
-                                  ;; Add to whatever was there before
-                                  (set-cdr! cell (cons (entry (cdr cell))))
-                                  ;; Add a new entry
-                                  (set! inverse-map (cons (cons (automata-name c) (list entry)) inverse-map))))
-                            cs))
-                        (production-children p)))
-                    (automata-productions a))))
+
+  ;;-----------------
+  (build-inverse-map ???)
+  ;; ----------------
   (define queue '())
   (define (pop-queue) (define x (car queue)) (set! queue (cdr queue)) x)
   (for-each-new (lambda (a)
                   ;; put in only those that are known to be non-empty
                   (and (exists (lambda (p) (exists (lambda (cs) (for-all (lambda (c) (automata-non-empty c)) cs)) (production-children))) (automata-productions a))
                        (set! queue (cons a queue)))))
+  ;; ------------------
   (define (run)
     (cond
       [(null? queue) (values)]
@@ -137,6 +156,7 @@
                                     (set! queue (cons (car entry) queue))))))
                   (assoc (automaton-name a) inverse-map))))
   (run)
+  ;; ----------------
   ;; eliminate production clauses calling non-non-empty automata
   (for-each-new (lambda (a)
                   (for-each (lambda (p)
