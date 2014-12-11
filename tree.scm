@@ -3,6 +3,7 @@
 (define-record-type automaton
   (fields
    name ;; set-of symbol?
+   (mutable non-empty) ;; boolean?
    (mutable productions) ;; list-of production?
    )
   (protocol
@@ -11,18 +12,28 @@
        (case-lambda
          [(names->automaton name) (f names->automaton name '())]
          [(names->automaton name productions)
-          (let ([a (make name productions)])
+          (let ([a (make name #t productions)]) ;; TODO: we might not want to assume newly created automata are non-empty
             (assert (not (assoc name (box-value names->automaton))))
             (box-value-set! names->automaton
                             (cons (cons name a) (box-value names->automaton)))
             a)]))
      f)))
 
+;; returns true if the automataon 'a' contains a production clause
+;; for which all the children are non-empty
+(define (compute-automaton-non-empty a)
+  (exists
+      (lambda (p)
+        (exists
+            (lambda (cs) (for-all (lambda (c) (automaton-non-empty c)) cs))
+          (production-children p)))
+    (automaton-productions a)))
+
 (define-record-type production
   (fields
    ;; NOTE: we factor out the constructor so we can iterate over every production that uses this constructor
    constructor ;; symbol? ;; TODO: primitives are constructor names
-   children ;; set-of (list-of automaton?)
+   (mutable children) ;; set-of (list-of automaton?)
    ))
 
 (define-record-type box (fields (mutable value)))
@@ -84,13 +95,6 @@
          (automaton-productions-set! a ps)
          a))]))
 
-;; runs f on each element of the part of new that is prefixed onto old.
-;; It is an error if old is not a suffix of new.
-(define (for-each-new new old f)
-  (cond
-    [(eq? new old) (values)]
-    [else (f (car new)) (for-each-new (cdr new) old f)]))
-
 ;; construct the "inverse map".  This maps automata names to the
 ;; productions of the automata that contain them.
 ;;
@@ -102,75 +106,95 @@
 ;; We don't optimize this as the cost of de-duplication
 ;; is high, and the algorithm using this inverse-map
 ;; costs only a little extra due to the duplication.
-(define (build-inverse-map new old)
+(define (build-inverse-map as)
   (define inverse-map '()) ;; multi-map names=(list-of sym) (cons parent=automaton children=(list automaton))
-  (for-each-new new old
-                (lambda (a)
-                  (ll ([p (automaton-productions a)]
-                       [cs (production-children p)]
-                       [c cs])
-                      (define entry (cons a cs))
-                      (define cell (assoc (automaton-name c) inverse-map))
-                      (if cell
-                          ;; Add to whatever was there before
-                          (set-cdr! cell (cons entry (cdr cell)))
-                          ;; Add a new entry
-                          (set! inverse-map (cons (cons (automaton-name c) (list entry)) inverse-map))))))
+  (ll ([a as]
+       [p (automaton-productions a)]
+       [cs (production-children p)]
+       [c cs])
+      (define entry (cons a cs))
+      (define cell (assoc (automaton-name c) inverse-map))
+      (if cell
+          ;; Add to whatever was there before
+          (set-cdr! cell (cons entry (cdr cell)))
+          ;; Add a new entry
+          (set! inverse-map (cons (cons (automaton-name c) (list entry)) inverse-map))))
   inverse-map)
 
-#;(define (intersect-driver a1 a2)
-  ;; We remember which automata are newly created
-  ;; by seeing which automata are added onto the old list of automata
-  (define old-names->automaton (box-value names->automaton))
-  (define for-each-new ;; applies 'f' to each new automaton
-    (case-lambda
-      [(f) (for-each-new f names->automaton)]
-      [(f n)
-       (cond
-         [(eq? (box-value n) old-names->automaton) (values)]
-         [else (f (car (box-value n))) (for-each-new f (cdr (box-value n)))])]))
-  (define a (intersect a1 a2)) ;; The top-level new automaton
-  ;; Start with the pessimistic assumption about non-emptiness
-  (for-each-new (lambda (a) (automaton-non-empty-set! a #f)))
+;; Return the part of new not in old assuming old is a suffix of new.
+;; It is an error if old is not a suffix of new.
+(define (prefix new old)
+  (cond
+    [(eq? new old) '()]
+    [else (cons (car new) (prefix (cdr new) old))]))
 
-  ;;-----------------
-  (build-inverse-map ???)
+(define (compute-non-empty* as)
   ;; ----------------
+  ;; This queue contains automata that should be marked as non-empty
   (define queue '())
-  (define (pop-queue) (define x (car queue)) (set! queue (cdr queue)) x)
-  (for-each-new (lambda (a)
-                  ;; put in only those that are known to be non-empty
-                  (and (exists (lambda (p) (exists (lambda (cs) (for-all (lambda (c) (automata-non-empty c)) cs)) (production-children))) (automata-productions a))
-                       (set! queue (cons a queue)))))
-  ;; ------------------
+  (define (dequeue) (define x (car queue)) (set! queue (cdr queue)) x)
+  (define (enqueue a)
+    (or (automaton-non-empty a) ;; don't enqueue if already non-empty
+        (begin (automaton-non-empty-set! a #t) (set! queue (cons a queue)))))
+
+  ;; if the automaton is
+  (define (check a)
+    (let ([v (assoc (automaton-name a) inverse-map)])
+        (and v
+             (ll ([entry (cdr v)])
+               (or (automaton-non-empty (car entry))
+                   (and (for-all automaton-non-empty (cdr entry))
+                        (enqueue (car entry))))))))
+  ;; Repeatedly run "check" on elements of the queue until it is empty
   (define (run)
     (cond
       [(null? queue) (values)]
-      [else (check (pop-queue)) (run)]))
-  (define (check a)
-    (or (automaton-non-empty a)
-        (for-each (lambda (entry)
-                    (or (automaton-non-empty (car entry))
-                        (and (for-all automaton-non-empty (cdr entry))
-                             (begin (automaton-non-empty-set! (car entry) #t)
-                                    (set! queue (cons (car entry) queue))))))
-                  (assoc (automaton-name a) inverse-map))))
+      [else (check (dequeue)) (run)]))
+
+  (define inverse-map (build-inverse-map as))
+  ;; NOTE: we assume the non-empty flag is correct on any child automata
+  ;; NOTE: currently our primitives are technically empty, but they have the non-empty bit set
+  ;; Start with the pessimistic assumption about non-emptiness
+  (ll ([a as]) (automaton-non-empty-set! a #f))
+  ;; put in the queue only those that are known to be non-empty
+  (ll ([a as]) (and (compute-automaton-non-empty a) (enqueue a)))
   (run)
-  ;; ----------------
-  ;; eliminate production clauses calling non-non-empty automata
-  (for-each-new (lambda (a)
-                  (for-each (lambda (p)
-                              (production-children-set! p
-                                                        (filter (lambda (cs) (exists (lambda (c) (not (automaton-non-empty c))) cs)) (production-children p))))
-                            (automaton-productions a))))
-  ;; eliminate productions with no production clauses
-  (for-each-new (lambda (a)
-                  (automata-productions-set! a
-                    (filter (lambda (p) (null? (production-children p)))))))
-  ;; set automata with no productions to be not-non-empty
-  (for-each-new (lambda (a) (automata-non-empty-set! a (not (null? (automata-productions a))))))
-  a
   )
+
+;; eliminate production clauses calling non-non-empty automata
+(define (filter-empty-clauses a)
+  (ll ([p (automaton-productions a)])
+      (production-children-set!
+         p (filter (lambda (cs) (not (exists (lambda (c) (not (automaton-non-empty c))) cs)))
+                   (production-children p)))))
+
+;; eliminate productions with no production clauses
+(define (filter-empty-productions a)
+  (automaton-productions-set! a (filter (lambda (p) (not (null? (production-children p))))
+                                        (automaton-productions a))))
+
+;; This is intersection but we also filter out empty automata and productions
+(define (intersect-driver a1 a2)
+  ;; ** First, we compute the intersection while keeping track of
+  ;; newly created automata **
+  ;;
+  ;; We remember which automata are newly created
+  ;; by seeing which automata are added onto the old list of automata
+  (define old-names->automaton (box-value names->automaton))
+  ;; Do the actual intersection
+  (define a (intersect a1 a2))
+  ;; Get the list of automata created while intersecting a1 and a2
+  (define new (map cdr (prefix (box-value names->automaton) old-names->automaton)))
+
+  ;; ** Next, we have to compute the non-emptiness 
+  (compute-non-empty* new)
+  ;; NOTE: this code is side-effecting the automata in 'new'.
+  ;; A nicer way to write this would be in terms of a 'map-graph'
+  ;; that applies a particular function to every object in a graph
+  (for-each filter-empty-clauses new)
+  (for-each filter-empty-productions new)  
+  a)
+
 
 ;; TODO: when reifying find tree automaton that are equal and give them
 ;; the same name (or at least for tree automaton that are equal to the intersection
