@@ -1,5 +1,3 @@
-;; Need to implement unfolding and intersection
-
 (define-record-type automaton
   (fields
    name ;; set-of symbol?
