@@ -200,6 +200,42 @@
 ;; the same name (or at least for tree automaton that are equal to the intersection
 ;; of some subset of automata that were interesected to make them)
 
-(define (unfold a t) ???)
-(define (non-empty? a) ???)
+(define (find-first p l)
+  (cond
+    [(null? l) #f]
+    [(p (car l)) (car l)]
+    [else (find-first p (cdr l))]))
+
+(define (automaton-has-constructor? a c)
+  (find-first (lambda (p) (eq? c (production-constructor p))) (automaton-productions a)))
+
+
+;; returns a list of mappings
+;; a mapping is a list of bindings
+;; a binding is a pair of a var? and an automaton
+;;
+;; returns the empty list on failure
+;;
+;; NOTE: there may be multiple bindings for each variable in the
+;; result.  The tree automata for each of these need to be intersected
+;; with each other.
+(define var? vector?)
+(define (unfold a t)
+  (cond
+    [(var? t) (list (list (cons t a)))]
+
+    [(symbol? t) (and (automaton-has-constructor? a 'symbol?) '(()))]
+    [(number? t) (and (automaton-has-constructor? a 'number?) '(()))]
+    [(eq? t #t)  (and (automaton-has-constructor? a 'true?)   '(()))]
+    [(eq? t #f)  (and (automaton-has-constructor? a 'false?)  '(()))]
+    [(null? t)   (and (automaton-has-constructor? a 'null?)   '(()))]
+    [(pair? t)   (let ([p (automaton-has-constructor? a 'pair?)])
+                   (and p
+                        ;; NOTE: this assumes all "pair?" constructors
+                        ;; have exactly two children
+                        (ll ([cs (production-children p)]
+                             [m (unfold (car cs) (car t))]
+                             [n (unfold (cadr cs) (cdr t))])
+                            (append m n))))]))
+
 
