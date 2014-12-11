@@ -314,12 +314,4 @@
 |#
 
 
-;; TODO:
-;;   need to implement unfolding
-;;   need to test intersection driver (maybe call this intersect-and-check-emptiness)
-;;     read that code
-;;     get a better syntax
-;;     factor out some helpers
-;;     unit test those helpers
-;;     TEST IT
-;;   Integrate into minikanren
+;; TODO: tree-automaton equality at reification time
