@@ -1,43 +1,86 @@
-(assert (equal? (combine-names '("a" "c" "d") '("b" "d" "e"))
-                '("a" "b" "c" "d" "e")))
+(import (only (equal) uf-equal?))
 
-(intersect (new-automaton '("a1")) (new-automaton '("a2")))
-;; ==> #[automaton ("a1" "a2") ()]
+(define-syntax test
+  (lambda (x)
+    (syntax-case x ()
+      [(_ expr result)
+       ;; We use a hacked uf-equal so we can test equality of recursive records
+       #`(let ([e expr]
+               [r result])
+          (unless (uf-equal? e r)
+           (raise
+             (condition
+               (make-message-condition "test failed")
+               (make-irritants-condition e)
+               (make-irritants-condition r)
+               (make-syntax-violation #'#,x #f)))))])))
+
+(define automaton
+  (case-lambda
+    [(name non-empty) (automaton name non-empty '())]
+    [(name non-empty productions) (make-automaton names->automaton name non-empty productions #f)]))
+
+(test (combine-names '("a" "c" "d") '("b" "d" "e"))
+  '("a" "b" "c" "d" "e"))
+
+(test (factor-productions '((cons 1 2) (cons 2 3) (cons 4 5) (foo 1) (foo 2) (nil) (string)))
+  (list (make-production 'cons '((4 5) (2 3) (1 2)))
+        (make-production 'foo '((2) (1)))
+        (make-production 'nil '(()))
+        (make-production 'string '(()))))
+
+(test (intersect (new-automaton '("a1")) (new-automaton '("a2")))
+  (automaton '("a1" "a2") #t '()))
 
 (clear-caches)
-(define sym (new-automaton '("sym") (list (make-production 'sym '(())))))
-(define num (new-automaton '("num") (list (make-production 'num '(())))))
-(define nil (new-automaton '("nil") (list (make-production 'nil '(())))))
-(define term1 (new-automaton '("term1")))
+
+(define sym (automaton '("sym") #t (list (make-production 'sym '(())))))
+(define num (automaton '("num") #t (list (make-production 'num '(())))))
+(define nil (automaton '("nil") #t (list (make-production 'nil '(())))))
+(define term1 (automaton '("term1") #t))
 (automaton-productions-set!
  term1
  (list (make-production 'cons (list (list term1 term1)))
        (make-production 'sym '(()))
        (make-production 'num '(()))))
-(define term2 (new-automaton '("term2")))
+(define term2 (automaton '("term2") #t))
 (automaton-productions-set!
  term2
  (list (make-production 'cons (list (list term2 term2)))
        (make-production 'nil '(()))
        (make-production 'sym '(()))
        (make-production 'num '(()))))
-(define binding (new-automaton '("binding")
+(define binding (automaton '("binding") #t
                                (list (make-production 'cons (list (list sym term1))))))
 
-(define env (new-automaton '("env")))
+(define env (automaton '("env") #t))
 (automaton-productions-set!
  env
  (list (make-production 'nil '(()))
        (make-production 'cons
                         (list (list binding env)))))
-(intersect env nil)
-;; ==> #[automaton ("env" "nil") (#[production nil ()])]
 
-(intersect env env)
-;; ==> env
 
-(intersect env term1)
+(test (let () (define-automata
+                [env [nil] [cons binding env]]
+                [binding [cons sym term1]]
+                [term1 [cons term1 term1] [sym] [num]]
+                [term2 [cons term2 term2] [nil] [sym] [num]]
+                [sym [sym]]
+                [num [num]]
+                [nil [nil]])
+           env)
+  env)
+
+(write "tests done!!")(newline)
 #|
+(test (intersect env nil)
+  (automaton ("env" "nil") #t (#[production nil ()])))
+
+(test (intersect env env) env)
+
+(test (intersect env term1)
+  
 #0=#[automaton ("env" "term1") (#[production cons ((#[automaton ("binding"
                                                                   "term1") (#[production cons ((#[automaton ("sym"
                                                                                                               "term1") (#[production sym ()])]
@@ -47,6 +90,9 @@
                                                                                                                             #[production num (())])]))])]
                                                      #0#))])]
 |#
+
+#|
+
 
 (clear-caches)
 (intersect term1 env)
@@ -313,5 +359,6 @@
                                                               #1#))])])))
 |#
 
+|#
 
 ;; TODO: tree-automaton equality at reification time

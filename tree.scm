@@ -9,13 +9,55 @@
      (define f
        (case-lambda
          [(names->automaton name) (f names->automaton name '())]
-         [(names->automaton name productions)
-          (let ([a (make name #t productions)]) ;; TODO: we might not want to assume newly created automata are non-empty
-            (assert (not (assoc name (box-value names->automaton))))
-            (box-value-set! names->automaton
-                            (cons (cons name a) (box-value names->automaton)))
+         [(names->automaton name productions) (f names->automaton name #t productions #t)]
+         [(names->automaton name non-empty productions use-cache?)
+          (let ([a (make name non-empty productions)]) ;; TODO: we might not want to assume newly created automata are non-empty
+            (if use-cache?
+                (begin
+                  (assert (not (assoc name (box-value names->automaton))))
+                  (box-value-set! names->automaton
+                                  (cons (cons name a) (box-value names->automaton)))))
             a)]))
      f)))
+
+(define (factor-productions productions)
+  (define factored-productions '())
+  ;; productions ::
+  (define (f p) (make-production (car p) (cdr p)))
+  (define (rec productions)
+    (cond
+      [(null? productions) (map f (reverse factored-productions))]
+      [(assq (caar productions) factored-productions)
+       => (lambda (entry)
+            (set-cdr! entry (cons (cdar productions) (cdr entry)))
+            (rec (cdr productions)))]
+      [else (set! factored-productions
+                  (cons (list (caar productions) (cdar productions)) factored-productions))
+            (rec (cdr productions))]))
+  (rec productions))
+
+;; (define-automata
+;;   [def-name (string-name ...) non-empty use-cache (ctor1 a2) (ctor2)]
+;;   [a2 ...]
+;;   ...)
+(define-syntax define-automata-internal
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_) #`(begin)]
+      [(_ [def-name string-names non-empty use-cache [ctor children ...] ...] . rest)
+       #`(begin
+           (define def-name (make-automaton names->automaton string-names non-empty '() use-cache))
+           (define-automata-internal . rest)
+           (define dummy (automaton-productions-set!
+                          def-name
+                          (factor-productions (list [list 'ctor children ...] ...)))))])))
+
+(define-syntax define-automata
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_ [name productions ...] ...)
+       (with-syntax ([(string-names ...) (map symbol->string (syntax->datum #'(name ...)))])
+         #`(define-automata-internal [name '(string-names) #t #t productions ...] ...))])))
 
 ;; returns true if the automataon 'a' contains a production clause
 ;; for which all the children are non-empty
