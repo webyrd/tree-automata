@@ -7,3 +7,23 @@ Infinite cycle checking for TA
 Factor out the global variable
 Clean up/license equal.sls
 Reification
+
+High-level, nested syntax:
+  (define foo (automata foo ([cons sym num] [nil]))
+  
+  (define env (automata (env [cons (binding [cons (sym [sym]) term])
+  	      		        	  env] [nil])
+			(term [cons term term]
+			      sym ;;; copies productions from sym
+			      [nil])))
+  (define env (automata (env ((sym . term) . env) ())))
+  
+  - Automata form as an expression (or define?)
+  - First automata is automatically the one returned
+  - No automata is anonymous
+  - can use an TA expr in place of a TA name
+  - can use a TA name in place of a production
+
+;; (automata TA)
+;; TA ::= name | (name production ...)
+;; production ::= name | [ctor TA ...]
