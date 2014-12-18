@@ -20,6 +20,13 @@
     [(name non-empty) (automaton name non-empty '())]
     [(name non-empty productions) (make-automaton names->automaton name non-empty productions #f)]))
 
+(define-syntax define-test-automata
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_ [name string-names non-empty productions ...] ...)
+       #`(define-automata-internal [name 'string-names non-empty #f productions ...] ...)])))
+
+
 (test (combine-names '("a" "c" "d") '("b" "d" "e"))
   '("a" "b" "c" "d" "e"))
 
@@ -72,45 +79,36 @@
            env)
   env)
 
-(write "tests done!!")(newline)
-#|
 (test (intersect env nil)
-  (automaton ("env" "nil") #t (#[production nil ()])))
+  (automaton '("env" "nil") #t (list (make-production 'nil '(())))))
 
 (test (intersect env env) env)
 
 (test (intersect env term1)
-  
-#0=#[automaton ("env" "term1") (#[production cons ((#[automaton ("binding"
-                                                                  "term1") (#[production cons ((#[automaton ("sym"
-                                                                                                              "term1") (#[production sym ()])]
-                                                                                                 #1=#[automaton ("term1") (#[production cons ((#1#
-                                                                                                                                                #1#))]
-                                                                                                                            #[production sym (())]
-                                                                                                                            #[production num (())])]))])]
-                                                     #0#))])]
-|#
-
-#|
-
+  (let () (define-test-automata
+            [a0 ("env" "term1") #t [cons a2 a0]]
+            [a2 ("binding" "term1") #t [cons a3 a1]]
+            [a1 ("term1") #t [cons a1 a1] [sym] [num]]
+            [a3 ("sym" "term1") #t [sym]])
+       a0))
 
 (clear-caches)
-(intersect term1 env)
-;; ==> same as with (intersect env term1)
 
-(intersect env term2)
-#|
-#0=#[automaton ("env" "term2") (#[production nil (())]
-                                 #[production cons ((#[automaton ("binding"
-                                                                   "term2") (#[production cons ((#[automaton ("sym"
-                                                                                                               "term2") (#[production sym ()])]
-                                                                                                  #1=#[automaton ("term1"
-                                                                                                                   "term2") (#[production cons ((#1#
-                                                                                                                                                  #1#))]
-                                                                                                                              #[production sym (())]
-                                                                                                                              #[production num (())])]))])]
-                                                      #0#))])]
-|#
+(test (intersect term1 env)
+  (let () (define-test-automata
+            [a0 ("env" "term1") #t [cons a2 a0]]
+            [a2 ("binding" "term1") #t [cons a3 a1]]
+            [a1 ("term1") #t [cons a1 a1] [sym] [num]]
+            [a3 ("sym" "term1") #t [sym]])
+       a0))
+
+(test (intersect env term2)
+  (let () (define-test-automata
+            [a0 ("env" "term2") #t [nil] [cons a2 a0]]
+            [a2 ("binding" "term2") #t [cons a3 a1]]
+            [a3 ("sym" "term2") #t [sym]]
+            [a1 ("term1" "term2") #t [cons a1 a1] [sym] [num]])
+       a0))
 
 (build-inverse-map (list env term1 term2 sym num nil binding))
 #|
@@ -250,26 +248,24 @@
 
 (assert (not (automaton-non-empty (intersect-driver (new-automaton '("a1")) (new-automaton '("a2"))))))
 
-(intersect-driver env nil)
-;; ==> #[automaton ("env-empty" "nil-empty") #t (#[production nil (())])]
+(test (intersect-driver env nil)
+  (automaton '("env-empty" "nil-empty") #t (list (make-production 'nil '(())))))
 
-(intersect-driver env env)
+(test (intersect-driver env env) env)
 ;; ==> env
-(intersect-driver env term1)
+
+(test (intersect-driver env term1) (automaton (list "env-empty" "term1-empty") #f '()))
 ;; ==> #[automaton ("env-empty" "term1-empty") #f ()]
-(intersect-driver env term2)
+
+(test (intersect-driver env term2)
+  (let () (define-test-automata
+            [a0 ("env-empty" "term2-empty") #t [nil] [cons a2 a0]]
+            [a1 ("term1-empty" "term2-empty") #t [cons a1 a1] [sym] [num]]
+            [a2 ("binding-empty" "term2-empty") #t [cons a3 a1]]
+            [a3 ("sym-empty" "term2-empty") #t [sym]])
+       a0))
+
 #|
-==> #0=#[automaton ("env-empty" "term2-empty") #t (#[production nil (())]
-                                                #[production cons ((#[automaton ("binding-empty"
-                                                                                  "term2-empty") #t (#[production cons ((#[automaton ("sym-empty"
-                                                                                                                                       "term2-empty") #t (#[production sym (())])]
-                                                                                                                          #1=#[automaton ("term1-empty"
-                                                                                                                                           "term2-empty") #t (#[production cons ((#1#
-                                                                                                                                                                                   #1#))]
-                                                                                                                                                               #[production sym (())]
-                                                                                                                                                               #[production num (())])]))])]
-                                                                     #0#))])]
-|#
 
 ;(intersect-driver term1 env)
 ;(intersect-driver env term2)
