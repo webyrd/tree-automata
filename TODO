@@ -1,0 +1,9 @@
+Add disequality constraints
+Support the absento constraint
+  - not-in-env-o
+Allow constants (e.g. symbols) in TA
+Finite domain support
+Infinite cycle checking for TA
+Factor out the global variable
+Clean up/license equal.sls
+Reification
