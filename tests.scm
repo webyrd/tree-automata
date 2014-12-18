@@ -252,10 +252,8 @@
   (automaton '("env-empty" "nil-empty") #t (list (make-production 'nil '(())))))
 
 (test (intersect-driver env env) env)
-;; ==> env
 
 (test (intersect-driver env term1) (automaton (list "env-empty" "term1-empty") #f '()))
-;; ==> #[automaton ("env-empty" "term1-empty") #f ()]
 
 (test (intersect-driver env term2)
   (let () (define-test-automata
@@ -264,8 +262,6 @@
             [a2 ("binding-empty" "term2-empty") #t [cons a3 a1]]
             [a3 ("sym-empty" "term2-empty") #t [sym]])
        a0))
-
-#|
 
 ;(intersect-driver term1 env)
 ;(intersect-driver env term2)
@@ -311,50 +307,13 @@
 (define as (list sym num nil term1 term2 binding env foo bar1 bar2))
 (compute-non-empty* as)
 
+(test (unfold env '#(a)) `(((#(a) . ,env))))
 
-(unfold env '#(a))
-#|
-(((#(a)
-   . #0=#[automaton ("env-empty") #t (#[production nil (())]
-                                       #[production cons ((#[automaton ("binding-empty") #t (#[production cons ((#[automaton ("sym-empty") #t (#[production sym (())])]
-                                                                                                                  #1=#[automaton ("term1-empty") #t (#[production cons ((#1#
-                                                                                                                                                                          #1#))]
-                                                                                                                                                      #[production sym (())]
-                                                                                                                                                      #[production num (())])]))])]
-                                                            #0#))])])))
-|#
+(test (unfold env '(#(a) . #(b))) `(((#(a) . ,binding)
+                                     (#(b) . ,env))))
 
-(unfold env '(#(a) . #(b)))
-#| ==>
-(((#(a)
-   . #[automaton ("binding-empty") #t (#[production pair? ((#[automaton ("sym-empty") #t (#[production symbol? (())])]
-                                                             #0=#[automaton ("term1-empty") #t (#[production pair? ((#0#
-                                                                                                                      #0#))]
-                                                                                                 #[production symbol? (())]
-                                                                                                 #[production number? (())])]))])])
-   (#(b)
-    . #1=#[automaton ("env-empty") #t (#[production null? (())]
-                                        #[production pair? ((#[automaton ("binding-empty") #t (#[production pair? ((#[automaton ("sym-empty") #t (#[production symbol? (())])]
-                                                                                                                     #0#))])]
-                                                              #1#))])])))
-|#
-
-(unfold env '((#(a) . #(b)) . #(c)))
-#| ==>
-(((#(a)
-   . #[automaton ("sym-empty") #t (#[production symbol? (())])])
-   (#(b)
-    . #0=#[automaton ("term1-empty") #t (#[production pair? ((#0#
-                                                               #0#))]
-                                          #[production symbol? (())]
-                                          #[production number? (())])])
-   (#(c)
-    . #1=#[automaton ("env-empty") #t (#[production null? (())]
-                                        #[production pair? ((#[automaton ("binding-empty") #t (#[production pair? ((#[automaton ("sym-empty") #t (#[production symbol? (())])]
-                                                                                                                     #0#))])]
-                                                              #1#))])])))
-|#
-
-|#
+(test (unfold env '((#(a) . #(b)) . #(c))) `(((#(a) . ,sym)
+                                              (#(b) . ,term1)
+                                              (#(c) . ,env))))
 
 ;; TODO: tree-automaton equality at reification time
