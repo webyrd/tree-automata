@@ -298,3 +298,5 @@
 ;;; Looks like we want to use 'intersect-driver' to perform intersection in unification.  Then check if the 'non-empty' field is set to true--if so, unification fails.
 
 ;;; Need a tree automata constraint operator that associates a tree automaton with a term.
+
+;;; Probably want (clear-caches) to be called at the beginning/end of 'run'.
