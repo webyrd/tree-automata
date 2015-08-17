@@ -288,7 +288,7 @@
 
 ;;; If the list of mappings retuned by the unfold wrapper is empty, unification should fail.
 
-;;; 'unfold' doesn't call 'walk'.  Need to either call walk* on 't', or interleave calls to 'walk' and 'unfold' until fresh variables are reached.
+;;; 'unfold' doesn't call 'walk'.  Need to either call walk* on 't', or interleave calls to 'walk' and 'unfold' until fresh variables are reached.  Could parameterize 'unfold' with 'walk'.
 
 
 ;;; Might want an 'apply automaton to term' helper function.
