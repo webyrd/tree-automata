@@ -249,7 +249,9 @@
 (define (automaton-has-constructor? a c)
   (find-first (lambda (p) (eq? c (production-constructor p))) (automaton-productions a)))
 
-
+;; 'a' is a tree automaton
+;; 't' is a miniKanren term
+;;
 ;; returns a list of mappings
 ;; a mapping is a list of bindings
 ;; a binding is a pair of a var? and an automaton
@@ -278,4 +280,21 @@
                              [n (unfold (cadr cs) (cdr t))])
                             (append m n))))]))
 
+;;; MINIKANREN INTEGRATION COMMENTS and TODO
+;;;
+;;; Define a wrapper for unfold that performs the intersection of the
+;;; tree automata when there are multiple bindings for a variable in
+;;; the map.  This is the helper we would want to use for unification.
 
+;;; If the list of mappings retuned by the unfold wrapper is empty, unification should fail.
+
+
+;;; Might want an 'apply automaton to term' helper function.
+
+
+;;; The less we change unification the better.  Unification can still be deterministic, but == will produce branching like conde.
+
+
+;;; Looks like we want to use 'intersect-driver' to perform intersection in unification.  Then check if the 'non-empty' field is set to true--if so, unification fails.
+
+;;; Need a tree automata constraint operator that associates a tree automaton with a term.
