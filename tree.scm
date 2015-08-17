@@ -300,3 +300,5 @@
 ;;; Need a tree automata constraint operator that associates a tree automaton with a term.
 
 ;;; Probably want (clear-caches) to be called at the beginning/end of 'run'.
+
+;;; Would be nice to be able to reify automata in 'define-automata' notation, so that the output could easily be used for another miniKanren program.
