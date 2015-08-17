@@ -290,7 +290,7 @@
 
 ;;; 'unfold' doesn't call 'walk'.  Need to either call walk* on 't', or interleave calls to 'walk' and 'unfold' until fresh variables are reached.  Could parameterize 'unfold' with 'walk'.
 
-;;; MDA says intersections are expensive, unfolds are cheap.
+;;; From a constant factor standpoint, MDA says intersections are expensive, unfolds are cheap.  However, unfold can produce branching.
 
 ;;; Might want an 'apply automaton to term' helper function.
 
