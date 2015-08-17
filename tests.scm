@@ -306,7 +306,6 @@
  bar2 (list (make-production 'pair? (list (list env bar1) (list env env)))))
 (define as (list sym num nil term1 term2 binding env foo bar1 bar2))
 (compute-non-empty* as)
-;;; Important: any productions built up using 'automaton-productions-set!' need to be passed to 'compute-non-empty*'.
 
 
 (test (unfold env '#(a)) `(((#(a) . ,env))))
