@@ -1,5 +1,8 @@
 (import (only (equal) uf-equal?))
 
+(define unfold (make-unfold vector? (lambda (a b) a) '()))
+
+
 (define-syntax test
   (lambda (x)
     (syntax-case x ()
@@ -317,6 +320,9 @@
                                               (#(b) . ,term1)
                                               (#(c) . ,env))))
 
+(display 'done)
+(display "\n")
+
 ;; TODO: tree-automaton equality at reification time
 
 
@@ -416,3 +422,4 @@
 (run 10 (environment value)
   (lookupo 'z environment value)
   (automata-constraint env environment))
+

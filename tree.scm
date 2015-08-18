@@ -267,24 +267,28 @@
 ;; NOTE: there may be multiple bindings for each variable in the
 ;; result.  The tree automata for each of these need to be intersected
 ;; with each other.
-(define var? vector?)
-(define (unfold a t)
-  (cond
-    [(var? t) (list (list (cons t a)))]
+(define (make-unfold var? walk S)
+  (letrec
+    ([unfold
+       (lambda (a t)
+         (let ([t (walk t S)])
+           (cond
+             [(var? t) (list (list (cons t a)))]
 
-    [(symbol? t) (and (automaton-has-constructor? a 'symbol?) '(()))]
-    [(number? t) (and (automaton-has-constructor? a 'number?) '(()))]
-    [(eq? t #t)  (and (automaton-has-constructor? a 'true?)   '(()))]
-    [(eq? t #f)  (and (automaton-has-constructor? a 'false?)  '(()))]
-    [(null? t)   (and (automaton-has-constructor? a 'null?)   '(()))]
-    [(pair? t)   (let ([p (automaton-has-constructor? a 'pair?)])
-                   (and p
-                        ;; NOTE: this assumes all "pair?" constructors
-                        ;; have exactly two children
-                        (ll ([cs (production-children p)]
-                             [m (unfold (car cs) (car t))]
-                             [n (unfold (cadr cs) (cdr t))])
-                            (append m n))))]))
+             [(symbol? t) (and (automaton-has-constructor? a 'symbol?) '(()))]
+             [(number? t) (and (automaton-has-constructor? a 'number?) '(()))]
+             [(eq? t #t)  (and (automaton-has-constructor? a 'true?)   '(()))]
+             [(eq? t #f)  (and (automaton-has-constructor? a 'false?)  '(()))]
+             [(null? t)   (and (automaton-has-constructor? a 'null?)   '(()))]
+             [(pair? t)   (let ([p (automaton-has-constructor? a 'pair?)])
+                            (and p
+                                 ;; NOTE: this assumes all "pair?" constructors
+                                 ;; have exactly two children
+                                 (ll ([cs (production-children p)]
+                                      [m (unfold (car cs) (car t))]
+                                      [n (unfold (cadr cs) (cdr t))])
+                                     (append m n))))])))])
+    unfold))
 
 ;;; MINIKANREN INTEGRATION COMMENTS and TODO
 ;;;
