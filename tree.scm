@@ -3,7 +3,6 @@
 ;;; * automata names are unique
 ;;; * any user-defined automata should be passed to 'compute-non-empty*' before use
 
-
 (define-record-type automaton
   (fields
    name ;; set-of symbol?
