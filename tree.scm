@@ -1,3 +1,5 @@
+
+
 ;;; Assumptions:
 ;;;
 ;;; * automata names are unique
@@ -274,19 +276,20 @@
            (cond
              [(var? t) (list (list (cons t a)))]
 
-             [(symbol? t) (and (automaton-has-constructor? a 'symbol?) '(()))]
-             [(number? t) (and (automaton-has-constructor? a 'number?) '(()))]
-             [(eq? t #t)  (and (automaton-has-constructor? a 'true?)   '(()))]
-             [(eq? t #f)  (and (automaton-has-constructor? a 'false?)  '(()))]
-             [(null? t)   (and (automaton-has-constructor? a 'null?)   '(()))]
+             [(symbol? t) (or (and (automaton-has-constructor? a 'symbol?) '(())) '())]
+             [(number? t) (or (and (automaton-has-constructor? a 'number?) '(())) '())]
+             [(eq? t #t)  (or (and (automaton-has-constructor? a 'true?)   '(())) '())]
+             [(eq? t #f)  (or (and (automaton-has-constructor? a 'false?)  '(())) '())]
+             [(null? t)   (or (and (automaton-has-constructor? a 'null?)   '(())) '())]
              [(pair? t)   (let ([p (automaton-has-constructor? a 'pair?)])
-                            (and p
+                            (or (and p
                                  ;; NOTE: this assumes all "pair?" constructors
                                  ;; have exactly two children
                                  (ll ([cs (production-children p)]
                                       [m (unfold (car cs) (car t))]
                                       [n (unfold (cadr cs) (cdr t))])
-                                     (append m n))))])))])
+                                     (append m n)))
+                                '()))])))])
     unfold))
 
 ;;; MINIKANREN INTEGRATION COMMENTS and TODO
