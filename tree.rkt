@@ -1,5 +1,17 @@
 #lang racket/base
 
+; TODO: name-to-automata-map should probably be an alist for best performance;
+;    we should restore michael's alist prefixing there.
+
+; Note that the hash-procs we define for automaton and production are awful (constant),
+;    so these objects should not currently be used as keys in hash maps or in sets
+;    anywhere that performance is at all relevant. The equal? we define probably
+;    suffers in performance because of this, but it's only used for tests so we don't care.
+
+; We tried using racket's sets for the automaton-productions and production-children, but
+;    because we needed to construct cyclic terms we were mutating elements after adding them to the sets,
+;    and thus getting bad behavior. Don't make that mistake again!
+
 (require
   (only-in racket/match match-let)
   (only-in racket/set list->set set-intersect set)
@@ -39,7 +51,6 @@
       (set! name-to-automaton-map (hash-set name-to-automaton-map name a)))
     a))
 
-(define flag #f)
 (define (factor-productions prods)
   (define factored
     (for/fold ([acc (hash)])
@@ -58,10 +69,6 @@
          (production 'nil (list '()))
          (production 'string (list '())))))
 
-;; (define-automata
-;;   [def-name (string-name ...) non-empty use-cache (ctor1 a2) (ctor2)]
-;;   [a2 ...]
-;;   ...)
 (define-syntax define-automata-internal
   (lambda (stx)
     (syntax-case stx ()
