@@ -1,15 +1,15 @@
-#lang racket
+#lang racket/base
 
-(require racket/serialize)
+(require
+  (only-in racket/match match-let)
+  (only-in racket/set list->set set-intersect set)
+  (for-syntax racket/base))
 
 (provide
+  define-automata
   make-unfold
   intersect!
-  clear-caches!
-  make-automaton!
-  production
-  set-automaton-productions!
-  define-automata)
+  clear-caches!)
 
 (module+ test
   (require rackunit))
@@ -19,11 +19,19 @@
 ;;; * automata names are unique
 ;;; * any user-defined automata should be passed to 'compute-non-empty*' before use
 
-(struct automaton [name [non-empty #:mutable] [productions #:mutable]] #:prefab)
+(struct automaton [name [non-empty #:mutable] [productions #:mutable]]
+        #:transparent
+        #:methods gen:equal+hash
+        [(define (equal-proc a1 a2 rec)
+           (match-let ([(automaton name1 non-empty1 productions1) a1]
+                       [(automaton name2 non-empty2 productions2) a2])
+             (and (rec name1 name2)
+                  (rec non-empty1 non-empty2)
+                  (rec (list->set productions1) (list->set productions2)))))
+         (define (hash-proc a rec) 1)
+         (define (hash2-proc a rec) 2)])
 
-(define (make-automaton! name [productions (set)] [non-empty #t] [use-cache #t])
-  (unless (set? productions)
-    (error 'make-automaton! "productions must be a set, but is: ~s" productions))
+(define (make-automaton! name [productions '()] [non-empty #t] [use-cache #t])
   (let ([a (automaton name non-empty productions)])
     (when use-cache
       (when (hash-has-key? name-to-automaton-map name)
@@ -31,22 +39,24 @@
       (set! name-to-automaton-map (hash-set name-to-automaton-map name a)))
     a))
 
+(define flag #f)
 (define (factor-productions prods)
   (define factored
     (for/fold ([acc (hash)])
               ([prod prods])
       (match-let ([(cons ctor children) prod])
-        (hash-update acc ctor (lambda (s) (set-add s children)) (set)))))
-  (for/set ([(ctor children-set) factored])
-    (production ctor children-set)))
+        (hash-update acc ctor (lambda (s) (cons children s)) '()))))
+
+  (for/list ([(ctor children-set) factored])
+            (production ctor children-set)))
 
 (module+ test
   (check-equal?
-    (factor-productions '((cons 1 2) (cons 2 3) (cons 4 5) (foo 1) (foo 2) (nil) (string)))
-    (set (production 'cons (set '(4 5) '(2 3) '(1 2)))
-         (production 'foo (set '(2) '(1)))
-         (production 'nil (set '()))
-         (production 'string (set '())))))
+    (list->set (factor-productions '((cons 1 2) (cons 2 3) (cons 4 5) (foo 1) (foo 2) (nil) (string))))
+    (set (production 'cons (list '(4 5) '(2 3) '(1 2)))
+         (production 'foo (list '(2) '(1)))
+         (production 'nil (list '()))
+         (production 'string (list '())))))
 
 ;; (define-automata
 ;;   [def-name (string-name ...) non-empty use-cache (ctor1 a2) (ctor2)]
@@ -58,7 +68,7 @@
       [(_) #`(begin)]
       [(_ [def-name string-names non-empty use-cache [ctor children ...] ...] . rest)
        #`(begin
-           (define def-name (make-automaton! string-names (set) non-empty use-cache))
+           (define def-name (make-automaton! string-names '() non-empty use-cache))
            (define-automata-internal . rest)
            (define dummy (set-automaton-productions!
                           def-name
@@ -78,7 +88,6 @@
 
 
 
-
 ;; returns true if the automataon 'a' contains a production clause
 ;; for which all the children are non-empty
 (define (compute-automaton-non-empty a)
@@ -86,10 +95,20 @@
       (lambda (p)
         (ormap
             (lambda (cs) (andmap (lambda (c) (automaton-non-empty c)) cs))
-          (set->list (production-children p))))
-    (set->list (automaton-productions a))))
+          (production-children p)))
+    (automaton-productions a)))
 
-(struct production [constructor [children #:mutable]] #:prefab)
+(struct production [constructor [children #:mutable]]
+        #:transparent
+        #:methods gen:equal+hash
+        [(define (equal-proc p1 p2 rec)
+           (match-let ([(production ctor1 children1) p1]
+                       [(production ctor2 children2) p2])
+             (and (rec ctor1 ctor2)
+                  (rec (list->set children1) (list->set children2)))))
+         (define (hash-proc p rec) 1)
+         (define (hash2-proc p rec) 2)])
+
 
 (define name-to-automaton-map (hash))
 ;; names->automaton :: alist (set-of symbol?) automaton?
@@ -123,8 +142,8 @@
 
 (define (intersect-internal a1 a2)
   (define name (combine-names (automaton-name a1) (automaton-name a2)))
-  (define ps1 (set->list (automaton-productions a1)))
-  (define ps2 (set->list (automaton-productions a2)))
+  (define ps1 (automaton-productions a1))
+  (define ps2 (automaton-productions a2))
   (cond
     [(hash-ref name-to-automaton-map name #f)]
     [else
@@ -142,19 +161,18 @@
                        (production
                         (production-constructor p1)
                         ;; iterate over each list of children
-                        (list->set
-                          (ll ([cs1 (set->list (production-children p1))]
-                               [cs2 (set->list (production-children p2))])
+                        (ll ([cs1 (production-children p1)]
+                               [cs2 (production-children p2)])
                               ;; iterate over each child
-                              (map intersect-internal cs1 cs2))))))])
-         (set-automaton-productions! a (list->set ps))
+                              (map intersect-internal cs1 cs2)))))])
+         (set-automaton-productions! a ps)
          a))]))
 
 (module+ test
   (check-equal?
     (intersect-internal
       (make-automaton! '("a1")) (make-automaton! '("a2")))
-    (make-automaton! '("a1" "a2") (set) #t #f))
+    (make-automaton! '("a1" "a2") '() #t #f))
 
   (define-syntax define-test-automata
     (lambda (stx)
@@ -165,45 +183,46 @@
   (let ()
     (clear-caches!)
 
-    (define sym (make-automaton! '("sym") (set (production 'sym (set '())))))
-    (define num (make-automaton! '("num") (set (production 'num (set '())))))
-    (define nil (make-automaton! '("nil") (set (production 'nil (set '())))))
+    (define sym (make-automaton! '("sym") (list (production 'symbol? (list '())))))
+    (define num (make-automaton! '("num") (list (production 'number? (list '())))))
+    (define nil (make-automaton! '("nil") (list (production 'null? (list '())))))
     (define term1 (make-automaton! '("term1")))
     (set-automaton-productions!
       term1
-      (set (production 'cons (set (list term1 term1)))
-           (production 'sym (set '()))
-           (production 'num (set '()))))
+      (list (production 'pair? (list (list term1 term1)))
+           (production 'symbol? (list '()))
+           (production 'number? (list '()))))
     (define term2 (make-automaton! '("term2")))
     (set-automaton-productions!
       term2
-      (set (production 'cons (set (list term2 term2)))
-           (production 'nil (set '()))
-           (production 'sym (set '()))
-           (production 'num (set '()))))
-    (define binding (make-automaton! '("binding") (set (production 'cons (set (list sym term1))))
-                                     ))
+      (list (production 'pair? (list (list term2 term2)))
+           (production 'null? (list '()))
+           (production 'symbol? (list '()))
+           (production 'number? (list '()))))
+    (define binding (make-automaton! '("binding") (list (production 'pair? (list (list sym term1))))))
 
     (define env (make-automaton! '("env")))
     (set-automaton-productions!
       env
-      (set (production 'cons
-                        (set (list binding env)))
-            (production 'nil (set '()))))
+      (list (production 'pair?
+                        (list (list binding env)))
+            (production 'null? (list '()))))
 
     (clear-caches!)
+
 
     (define other-env
       (let ()
         (define-automata
-          [env [nil] [cons binding env]]
-          [binding [cons sym term1]]
-          [term1 [cons term1 term1] [sym] [num]]
-          [term2 [cons term2 term2] [nil] [sym] [num]]
-          [sym [sym]]
-          [num [num]]
-          [nil [nil]])
+          [env [null?] [pair? binding env]]
+          [binding [pair? sym term1]]
+          [term1 [pair? term1 term1] [symbol?] [number?]]
+          [term2 [pair? term2 term2] [null?] [symbol?] [number?]]
+          [sym [symbol?]]
+          [num [number?]]
+          [nil [null?]])
         env))
+
 
     (check-equal?
       other-env
@@ -211,7 +230,7 @@
 
     (check-equal?
       (intersect-internal env nil)
-      (automaton '("env" "nil") #t (set (production 'nil (set '())))))
+      (automaton '("env" "nil") #t (list (production 'null? (list '())))))
 
     (check-equal?
       (intersect-internal env env)
@@ -221,10 +240,10 @@
       (intersect-internal env term1)
       (let ()
         (define-test-automata
-          [a0 ("env" "term1") #t [cons a2 a0]]
-          [a2 ("binding" "term1") #t [cons a3 a1]]
-          [a1 ("term1") #t [cons a1 a1] [sym] [num]]
-          [a3 ("sym" "term1") #t [sym]])
+          [a0 ("env" "term1") #t [pair? a2 a0]]
+          [a2 ("binding" "term1") #t [pair? a3 a1]]
+          [a1 ("term1") #t [pair? a1 a1] [symbol?] [number?]]
+          [a3 ("sym" "term1") #t [symbol?]])
         a0))
     ))
 
@@ -244,8 +263,8 @@
 (define (build-inverse-map as)
   (define inverse-map '()) ;; multi-map names=(list-of sym) (cons parent=automaton children=(list automaton))
   (ll ([a as]
-       [p (set->list (automaton-productions a))]
-       [cs (set->list (production-children p))]
+       [p (automaton-productions a)]
+       [cs (production-children p)]
        [c cs])
       (define entry (cons a cs))
       (define cell (assoc (automaton-name c) inverse-map))
@@ -290,18 +309,13 @@
     (define inverse-map (build-inverse-map (list env term1 term2 sym num nil binding)))
 
     (check-equal?
-      (list->set (unbox (cdr (assoc (automaton-name sym) inverse-map))))
-      (set (cons binding (first (set->list (production-children (first (set->list (automaton-productions binding)))))))))
+      (unbox (cdr (assoc (automaton-name sym) inverse-map)))
+      (list (cons binding (car (production-children (car (automaton-productions binding))))))
+      "The inverse association for the sym automata should consist of a set containing one value:
+         a pair of the binding automata and the one list of children for its pair constructor.")
 
     (check-true (compute-automaton-non-empty env))
     (check-true (compute-automaton-non-empty sym))))
-
-;; Return the part of new not in old assuming old is a suffix of new.
-;; It is an error if old is not a suffix of new.
-(define (prefix new old)
-  (cond
-    [(eq? new old) '()]
-    [else (cons (car new) (prefix (cdr new) old))]))
 
 (define (compute-non-empty* as)
   ;; ----------------
@@ -333,29 +347,92 @@
   (ll ([a as]) (set-automaton-non-empty! a #f))
   ;; put in the queue only those that are known to be non-empty
   (ll ([a as]) (and (compute-automaton-non-empty a) (enqueue a)))
-  (run)
-  )
+  (run))
 
 ;; eliminate production clauses calling non-non-empty automata
 (define (filter-empty-clauses a)
   (ll ([p (automaton-productions a)])
       (set-production-children!
-         p (list->set (filter (lambda (cs) (not (ormap (lambda (c) (not (automaton-non-empty c))) cs)))
-                   (set->list (production-children p)))))))
+         p (filter (lambda (cs) (not (ormap (lambda (c) (not (automaton-non-empty c))) cs)))
+                   (production-children p)))))
 
 ;; eliminate productions with no production clauses
 (define (filter-empty-productions a)
-  (set-automaton-productions! a (filter (lambda (p) (not (null? (set->list (production-children p)))))
-                                        (automaton-productions a))))
+  (set-automaton-productions! a (filter (lambda (p) (not (null? (production-children p))))
+                                                   (automaton-productions a))))
+
+
+(module+ test
+  (let ()
+    (clear-caches!)
+    (define sym (make-automaton! '("sym") (list (production 'symbol? (list '())))))
+    (define num (make-automaton! '("num") (list (production 'number? (list '())))))
+    (define nil (make-automaton! '("nil") (list (production 'null? (list '())))))
+    (define term1 (make-automaton! '("term1")))
+    (set-automaton-productions!
+      term1
+      (list (production 'pair? (list (list term1 term1)))
+           (production 'symbol? (list '()))
+           (production 'number? (list '()))))
+    (define term2 (make-automaton! '("term2")))
+    (set-automaton-productions!
+      term2
+      (list (production 'pair? (list (list term2 term2)))
+           (production 'null? (list '()))
+           (production 'symbol? (list '()))
+           (production 'number? (list '()))))
+    (define binding (make-automaton! '("binding") (list (production 'pair? (list (list sym term1))))))
+
+    (define env (make-automaton! '("env")))
+    (set-automaton-productions!
+      env
+      (list (production 'pair?
+                        (list (list binding env)))
+            (production 'null? (list '()))))
+
+    ; Self-recursive, with no base case. Should be empty.
+    (define foo (make-automaton! '("foo-empty")))
+    (set-automaton-productions!
+      foo (list (production 'pair? (list (list env foo)))))
+
+    ; Mutually recursive, with a base case. Should be non-empty.
+    (define bar1 (make-automaton! '("bar1-empty")))
+    (define bar2 (make-automaton! '("bar2-empty")))
+    (set-automaton-productions!
+      bar1 (list (production 'pair? (list (list env bar2)))))
+    (set-automaton-productions!
+      bar2 (list (production 'pair? (list (list env bar1) (list env env)))))
+
+    ; Mutually recursive with no base case. Should be empty.
+    (define im-so-empty (make-automaton! '("im-so-empty")))
+    (define oh-so-empty (make-automaton! '("oh-so-empty")))
+    (set-automaton-productions!
+      im-so-empty (list (production 'pair? (list (list env oh-so-empty)))))
+    (set-automaton-productions!
+      oh-so-empty (list (production 'pair? (list (list env im-so-empty)))))
+
+    (define type-confusion! (intersect! sym num))
+
+    (define as (list sym num nil term1 term2 binding env foo bar1 bar2 im-so-empty oh-so-empty type-confusion!))
+    (compute-non-empty* as)
+    (check-equal? (map automaton-non-empty as)
+                  '(#t #t #t #t #t #t #t #f #t #t #f #f #f))))
 
 (define (hash-key-subtract h1 h2)
   (define key-difference
-    (set-subtract
+    (set-intersect
       (hash-keys h1)
       (hash-keys h2)))
   (for/fold ([acc h1])
             ([key key-difference])
     (hash-remove acc key)))
+
+(module+ test
+  (check-equal?
+    (hash-key-subtract
+      (hash 'a 1 'b 2 'c 3)
+      (hash 'a 1))
+    (hash 'b 2 'c 3)))
 
 ;; This is intersection but we also filter out empty automata and productions
 (define (intersect! a1 a2)
@@ -378,6 +455,63 @@
   (for-each filter-empty-clauses new)
   (for-each filter-empty-productions new)
   a)
+
+(module+ test
+  (let ()
+    (clear-caches!)
+
+    (define-automata
+      [env [null?] [pair? binding env]]
+      [binding [pair? num num]]
+      [term2 [pair? term2 term2] [null?] [number?]]
+      [num [number?]]
+      [nil [null?]])
+
+    (check-equal? (intersect! env term2)
+                  (let () (define-test-automata
+                            [a0 ("env" "term2") #t [pair? a2 a0] [null?]]
+                            [a1 ("num" "term2") #t [number?]]
+                            [a2 ("binding" "term2") #t [pair? a1 a1]]
+                            )
+                    a0)))
+
+  (let ()
+    (clear-caches!)
+
+    (define-automata
+      [env [null?] [pair? binding env]]
+      [binding [pair? sym term1]]
+      [term1 [pair? term1 term1] [symbol?] [number?]]
+      [term2 [pair? term2 term2] [null?] [symbol?] [number?]]
+      [sym [symbol?]]
+      [num [number?]]
+      [nil [null?]])
+
+    (define a1 (make-automaton! '("a1")))
+    (define a2 (make-automaton! '("a2")))
+    (compute-non-empty* (list a1 a2))
+
+    (check-true (not (automaton-non-empty a1)))
+    (check-true (not (automaton-non-empty a2)))
+
+    (check-true (not (automaton-non-empty (intersect! a1 a2))))
+
+    ;(check-true (not (automaton-non-empty (intersect! (make-automaton! '("a1")) (make-automaton! '("a2"))))))
+
+    (check-equal? (intersect! env nil)
+                  (automaton '("env" "nil") #t (list (production 'null? (list '())))))
+
+    (check-equal? (intersect! env env) env)
+
+    (check-equal? (intersect! env term1) (automaton (list "env" "term1") #f '()))
+
+    (check-equal? (intersect! env term2)
+                  (let () (define-test-automata
+                            [a0 ("env" "term2") #t [null?] [pair? a2 a0]]
+                            [a1 ("term1" "term2") #t [pair? a1 a1] [symbol?] [number?]]
+                            [a2 ("binding" "term2") #t [pair? a3 a1]]
+                            [a3 ("sym" "term2") #t [symbol?]])
+                    a0))))
 
 
 ;; TODO: when reifying find tree automaton that are equal and give them
@@ -422,12 +556,18 @@
                             (or (and p
                                  ;; NOTE: this assumes all "pair?" constructors
                                  ;; have exactly two children
-                                 (ll ([cs (set->list (production-children p))]
+                                 (ll ([cs (production-children p)]
                                       [m (unfold (car cs) (car t))]
                                       [n (unfold (cadr cs) (cdr t))])
                                      (append m n)))
                                 '()))])))])
     unfold))
+
+
+
+
+
+
 
 ;;; MINIKANREN INTEGRATION COMMENTS and TODO
 ;;;
