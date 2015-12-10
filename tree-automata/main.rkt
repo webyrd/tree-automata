@@ -21,7 +21,9 @@
   define-automata
   make-unfold
   intersect!
-  clear-caches!)
+  clear-caches!
+  automaton-non-empty
+  automaton-name)
 
 (module+ test
   (require rackunit))
@@ -46,9 +48,9 @@
 (define (make-automaton! name [productions '()] [non-empty #t] [use-cache #t])
   (let ([a (automaton name non-empty productions)])
     (when use-cache
-      (when (hash-has-key? name-to-automaton-map name)
+      (when (assoc name name-to-automaton-map)
         (error 'make-automaton! "automata names should be unique, but this automaton '~s' is already registered" name))
-      (set! name-to-automaton-map (hash-set name-to-automaton-map name a)))
+      (set! name-to-automaton-map (cons (cons name a) name-to-automaton-map)))
     a))
 
 (define (factor-productions prods)
@@ -117,7 +119,7 @@
          (define (hash2-proc p rec) 2)])
 
 
-(define name-to-automaton-map (hash))
+(define name-to-automaton-map '())
 ;; names->automaton :: alist (set-of symbol?) automaton?
 
 ;; ll computes a tree comprehension.  It also filters out any results
@@ -145,14 +147,14 @@
     (combine-names '("a" "c" "d") '("b" "d" "e"))
     '("a" "b" "c" "d" "e")))
 
-(define (clear-caches!) (set! name-to-automaton-map (hash)))
+(define (clear-caches!) (set! name-to-automaton-map '()))
 
 (define (intersect-internal a1 a2)
   (define name (combine-names (automaton-name a1) (automaton-name a2)))
   (define ps1 (automaton-productions a1))
   (define ps2 (automaton-productions a2))
   (cond
-    [(hash-ref name-to-automaton-map name #f)]
+    [(assoc name name-to-automaton-map) => cdr]
     [else
      ;; We have to allocate the automaton in advance in case there is
      ;; a recursive loop.  We set the automaton's productions after the recursion.
@@ -425,21 +427,10 @@
     (check-equal? (map automaton-non-empty as)
                   '(#t #t #t #t #t #t #t #f #t #t #f #f #f))))
 
-(define (hash-key-subtract h1 h2)
-  (define key-difference
-    (set-intersect
-      (hash-keys h1)
-      (hash-keys h2)))
-  (for/fold ([acc h1])
-            ([key key-difference])
-    (hash-remove acc key)))
-
-(module+ test
-  (check-equal?
-    (hash-key-subtract
-      (hash 'a 1 'b 2 'c 3)
-      (hash 'a 1))
-    (hash 'b 2 'c 3)))
+(define (prefix new old)
+  (cond
+    [(eq? new old) '()]
+    [else (cons (car new) (prefix (cdr new) old))]))
 
 ;; This is intersection but we also filter out empty automata and productions
 (define (intersect! a1 a2)
@@ -452,7 +443,7 @@
   ;; Do the actual intersection
   (define a (intersect-internal a1 a2))
   ;; Get the list of automata created while intersecting a1 and a2
-  (define new (hash-values (hash-key-subtract name-to-automaton-map old-name-to-automaton-map)))
+  (define new (map cdr (prefix name-to-automaton-map old-name-to-automaton-map)))
 
   ;; ** Next, we have to compute the non-emptiness
   (compute-non-empty* new)
@@ -601,3 +592,4 @@
 ;;; Probably want (clear-caches) to be called at the beginning/end of 'run'.
 
 ;;; Would be nice to be able to reify automata in 'define-automata' notation, so that the output could easily be used for another miniKanren program.
+

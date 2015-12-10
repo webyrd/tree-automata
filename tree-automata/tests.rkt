@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require "tree.rkt")
+(require tree-automata)
 
 (require rackunit)
 
