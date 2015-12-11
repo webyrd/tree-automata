@@ -1,8 +1,5 @@
 #lang racket/base
 
-; TODO: name-to-automata-map should probably be an alist for best performance;
-;    we should restore michael's alist prefixing there.
-
 ; Note that the hash-procs we define for automaton and production are awful (constant),
 ;    so these objects should not currently be used as keys in hash maps or in sets
 ;    anywhere that performance is at all relevant. The equal? we define probably
@@ -12,9 +9,17 @@
 ;    because we needed to construct cyclic terms we were mutating elements after adding them to the sets,
 ;    and thus getting bad behavior. Don't make that mistake again!
 
+; is it actually necessary to have the initial automata in the cache, or just the intersected automata?
+; If so, logic from make-automaton could move to intersect!
+
+; Assumptions:
+; - automata names are unique
+; - any user-defined automata should be passed to 'compute-non-empty*' before use
+
 (require
   (only-in racket/match match-let)
-  (only-in racket/set list->set set-intersect set)
+  (only-in racket/set list->set set)
+  (only-in racket/list remove-duplicates)
   (for-syntax racket/base))
 
 (provide
@@ -28,31 +33,28 @@
 (module+ test
   (require rackunit))
 
-;;; Assumptions:
-;;;
-;;; * automata names are unique
-;;; * any user-defined automata should be passed to 'compute-non-empty*' before use
-
-(struct automaton [name [non-empty #:mutable] [productions #:mutable]]
+(struct automaton [name [productions #:mutable] [non-empty #:mutable]]
         #:transparent
         #:methods gen:equal+hash
         [(define (equal-proc a1 a2 rec)
-           (match-let ([(automaton name1 non-empty1 productions1) a1]
-                       [(automaton name2 non-empty2 productions2) a2])
+           (match-let ([(automaton name1 productions1 non-empty1) a1]
+                       [(automaton name2 productions2 non-empty2) a2])
              (and (rec name1 name2)
-                  (rec non-empty1 non-empty2)
-                  (rec (list->set productions1) (list->set productions2)))))
+                  (rec (list->set productions1) (list->set productions2))
+                  (rec non-empty1 non-empty2))))
          (define (hash-proc a rec) 1)
          (define (hash2-proc a rec) 2)])
 
 (define (make-automaton! name [productions '()] [non-empty #t] [use-cache #t])
-  (let ([a (automaton name non-empty productions)])
+  (let ([a (automaton name productions non-empty)])
     (when use-cache
       (when (assoc name name-to-automaton-map)
         (error 'make-automaton! "automata names should be unique, but this automaton '~s' is already registered" name))
       (set! name-to-automaton-map (cons (cons name a) name-to-automaton-map)))
     a))
 
+; Given a list of production descriptions like '(pair? a1 a2) and lifts the productions
+; with common constructors and returns a list of production objects, one per constructor.
 (define (factor-productions prods)
   (define factored
     (for/fold ([acc (hash)])
@@ -61,7 +63,7 @@
         (hash-update acc ctor (lambda (s) (cons children s)) '()))))
 
   (for/list ([(ctor children-set) factored])
-            (production ctor children-set)))
+    (production ctor children-set)))
 
 (module+ test
   (check-equal?
@@ -71,18 +73,24 @@
          (production 'nil (list '()))
          (production 'string (list '())))))
 
+; Defines automata without checking emptiness and allowing explicit specification of
+; the automata name. Useful for defining automata to compare to the results of intersection
+; in tests.
 (define-syntax define-automata-internal
   (lambda (stx)
     (syntax-case stx ()
-      [(_) #`(begin)]
-      [(_ [def-name string-names non-empty use-cache [ctor children ...] ...] . rest)
+      [(_ [def-name string-names non-empty use-cache [ctor children ...] ...] ...)
        #`(begin
            (define def-name (make-automaton! string-names '() non-empty use-cache))
-           (define-automata-internal . rest)
-           (define dummy (set-automaton-productions!
-                          def-name
-                          (factor-productions (list [list 'ctor children ...] ...)))))])))
+           ...
+           (set-automaton-productions!
+             def-name
+             (factor-productions (list [list 'ctor children ...] ...)))
+           ...
+           )])))
 
+; Defines automata named the same as the variable into which they are defined.
+; Throws an error if any of the automata are empty.
 (define-syntax define-automata
   (lambda (stx)
     (syntax-case stx ()
@@ -95,17 +103,13 @@
                (unless (automaton-non-empty a)
                  (error 'define-automata "automaton ~s is non-empty" (automaton-name a))))))])))
 
-
-
-;; returns true if the automataon 'a' contains a production clause
-;; for which all the children are non-empty
+; Assuming the non-empty flag of all children is correct, return whether this
+; automata should be considered empty.
 (define (compute-automaton-non-empty a)
-  (ormap
-      (lambda (p)
-        (ormap
-            (lambda (cs) (andmap (lambda (c) (automaton-non-empty c)) cs))
-          (production-children p)))
-    (automaton-productions a)))
+  (for*/or ([p (automaton-productions a)]
+            [cs (production-children p)])
+    (for/and ([c cs])
+      (automaton-non-empty c))))
 
 (struct production [constructor [children #:mutable]]
         #:transparent
@@ -119,8 +123,8 @@
          (define (hash2-proc p rec) 2)])
 
 
+;; name-to-automaton-map :: alist (set-of symbol?) automaton?
 (define name-to-automaton-map '())
-;; names->automaton :: alist (set-of symbol?) automaton?
 
 ;; ll computes a tree comprehension.  It also filters out any results
 ;; that are #f and each binding in the comprehension is in the scope
@@ -135,19 +139,15 @@
 ;; NOTE: names are sets of symbols so we have a sensible name for intersects and take advantage of the associativity, communitivity and idempotency of intersect
 ;; NOTE: the name '() thus is the name of the universe
 (define (combine-names n1 n2)
-  (define (f l) ;; Eliminate duplicates from the list
-    (cond
-      [(or (null? l) (null? (cdr l))) l]
-      [(string=? (car l) (cadr l)) (f (cdr l))]
-      [else (cons (car l) (f (cdr l)))]))
-  (f (sort (append n1 n2) string<?)))
+  (remove-duplicates (sort (append n1 n2) string<?)))
 
 (module+ test
   (check-equal?
     (combine-names '("a" "c" "d") '("b" "d" "e"))
     '("a" "b" "c" "d" "e")))
 
-(define (clear-caches!) (set! name-to-automaton-map '()))
+(define (clear-caches!)
+  (set! name-to-automaton-map '()))
 
 (define (intersect-internal a1 a2)
   (define name (combine-names (automaton-name a1) (automaton-name a2)))
@@ -171,9 +171,9 @@
                         (production-constructor p1)
                         ;; iterate over each list of children
                         (ll ([cs1 (production-children p1)]
-                               [cs2 (production-children p2)])
-                              ;; iterate over each child
-                              (map intersect-internal cs1 cs2)))))])
+                             [cs2 (production-children p2)])
+                            ;; iterate over each child
+                            (map intersect-internal cs1 cs2)))))])
          (set-automaton-productions! a ps)
          a))]))
 
@@ -239,7 +239,7 @@
 
     (check-equal?
       (intersect-internal env nil)
-      (automaton '("env" "nil") #t (list (production 'null? (list '())))))
+      (automaton '("env" "nil") (list (production 'null? (list '()))) #t))
 
     (check-equal?
       (intersect-internal env env)
@@ -497,11 +497,11 @@
     ;(check-true (not (automaton-non-empty (intersect! (make-automaton! '("a1")) (make-automaton! '("a2"))))))
 
     (check-equal? (intersect! env nil)
-                  (automaton '("env" "nil") #t (list (production 'null? (list '())))))
+                  (automaton '("env" "nil") (list (production 'null? (list '()))) #t))
 
     (check-equal? (intersect! env env) env)
 
-    (check-equal? (intersect! env term1) (automaton (list "env" "term1") #f '()))
+    (check-equal? (intersect! env term1) (automaton (list "env" "term1") '() #f))
 
     (check-equal? (intersect! env term2)
                   (let () (define-test-automata
@@ -516,14 +516,8 @@
 ;; the same name (or at least for tree automaton that are equal to the intersection
 ;; of some subset of automata that were interesected to make them)
 
-(define (find-first p l)
-  (cond
-    [(null? l) #f]
-    [(p (car l)) (car l)]
-    [else (find-first p (cdr l))]))
-
 (define (automaton-has-constructor? a c)
-  (find-first (lambda (p) (eq? c (production-constructor p))) (automaton-productions a)))
+  (findf (lambda (p) (eq? c (production-constructor p))) (automaton-productions a)))
 
 ;; 'a' is a tree automaton
 ;; 't' is a miniKanren term
