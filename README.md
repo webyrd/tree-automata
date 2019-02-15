@@ -3,4 +3,4 @@ tree-automata
 
 Tree-automata-based run-time type constraints for miniKanren
 
-With Michael D. Adams
+Tree automata code by Michael D. Adams
